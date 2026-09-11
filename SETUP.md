@@ -118,6 +118,7 @@ backfill    replay old mail (--days N --dry-run)
 catchup     mark existing mail as seen, no alerts
 run         the watcher
 renew       daily: re-arm watch, sweep for misses
+heartbeat   weekly: tell users the watcher is alive
 timeline    per-company round history
 ```
 
@@ -145,12 +146,17 @@ CDC mail, then set `GCP_PROJECT` and `MODE=push`.
 
 ```bash
 sudo cp deploy/*.service deploy/*.timer /etc/systemd/system/
-sudo systemctl enable --now cdc-watch.service cdc-watch-renew.timer
+sudo systemctl enable --now cdc-watch.service cdc-watch-renew.timer \
+  cdc-watch-heartbeat.timer
 ```
 
 Edit the unit files if your user or path differ from `pi` and
 `/home/pi/cdc-watch`. `token.json` copies across, so you don't re-authorise on
 the Pi.
+
+The weekly heartbeat sends every user a "still watching" message. Its value
+is the absence of one: a silent bot otherwise looks exactly like a quiet week,
+so a dead Pi goes unnoticed until someone misses a shortlist.
 
 The daily timer is not optional in push mode: `users.watch()` expires after 7
 days and **stops delivering with no error**. The same job sweeps the last 3

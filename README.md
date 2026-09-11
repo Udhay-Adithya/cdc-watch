@@ -23,7 +23,9 @@ don't break it. Drives that use their own identifiers work too — TCS reference
 numbers and Cognizant Superset IDs, alongside Neo IDs.
 
 It also keeps a per-company timeline, so `/status` shows how far each drive
-got: applied → online test → interview → final list.
+got: applied → online test → interview → final list. `/search foodhub` checks
+past mail for a drive on demand, and a weekly heartbeat means a dead Pi is
+noticeable rather than silent.
 
 ## Running it yourself
 
