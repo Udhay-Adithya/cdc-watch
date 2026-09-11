@@ -1,0 +1,15 @@
+[Unit]
+Description=CDC placement shortlist watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/cdc-watch
+ExecStart=/home/pi/cdc-watch/.venv/bin/python -m cdcwatch.main run
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

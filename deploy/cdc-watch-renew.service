@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew Gmail watch (expires after 7 days, silently)
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/cdc-watch
+ExecStart=/home/pi/cdc-watch/.venv/bin/python -m cdcwatch.main renew
