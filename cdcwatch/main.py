@@ -4,6 +4,7 @@ import json
 import re
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 from . import botmeta, classify, config, gmail, identity, notify, telegram_bot
 from .extract import extract
@@ -77,21 +78,29 @@ def process(svc, store, msg_id, dry_run=False, verbose=False):
                 print(text)
                 print("-" * 60)
             continue
-        if quiet or store.was_delivered(msg_id, chat_id):
+        if store.was_delivered(msg_id, chat_id):
             continue
-        try:
-            notify.send(text, silent=(verdict.status != FOUND), chat_id=chat_id)
-            if verdict.status == FOUND:
-                for filename, data in mail.attachments:
-                    try:
-                        notify.send_document(filename, data, caption="Source list",
-                                             chat_id=chat_id)
-                    except Exception as exc:
-                        log("attachment upload failed:", exc)
+        if quiet:
+            # Evaluated, nothing worth sending. Still marked so it is counted
+            # once and never re-evaluated for this user.
             store.mark_delivered(msg_id, chat_id)
-        except Exception as exc:
-            all_sent = False
-            log("send to {} failed: {}".format(chat_id, exc))
+        else:
+            try:
+                notify.send(text, silent=(verdict.status != FOUND),
+                            chat_id=chat_id)
+                if verdict.status == FOUND:
+                    for filename, data in mail.attachments:
+                        try:
+                            notify.send_document(filename, data,
+                                                 caption="Source list",
+                                                 chat_id=chat_id)
+                        except Exception as exc:
+                            log("attachment upload failed:", exc)
+                store.mark_delivered(msg_id, chat_id)
+            except Exception as exc:
+                all_sent = False
+                log("send to {} failed: {}".format(chat_id, exc))
+                continue
 
         store.add_event(
             msg_id=msg_id, chat_id=chat_id, thread_id=mail.thread_id,
@@ -260,6 +269,49 @@ def cmd_catchup(args):
     store = Store(config.DB_PATH)
     n = baseline(svc, store, "newer_than:{}d".format(args.days))
     log("marked", n, "existing message(s) as seen -- no alerts sent")
+    return 0
+
+
+def heartbeat(store, days=7):
+    """Tell every user the watcher is alive, and what it did this week.
+
+    The point is the absence: if this stops arriving, the watcher is down.
+    A silent bot is otherwise indistinguishable from a quiet week, which is
+    the failure mode that actually costs someone a placement.
+    """
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    sent = 0
+    for user in store.list_users():
+        chat_id = user["chat_id"]
+        if not identity.is_usable(identity.current(store, chat_id)):
+            continue
+        counts = store.status_counts_since(chat_id, since)
+        checked = sum(counts.values())
+        lines = ["\u2705 <b>Still watching.</b>"]
+        if checked:
+            bits = ["{} CDC mail checked".format(checked)]
+            if counts.get(FOUND):
+                bits.append("<b>{} you were on</b>".format(counts[FOUND]))
+            if counts.get("UNPARSED"):
+                bits.append("{} needing a manual look".format(counts["UNPARSED"]))
+            lines.append("Past {} days: {}.".format(days, " · ".join(bits)))
+        else:
+            lines.append("Past {} days: no CDC mail at all.".format(days))
+        lines.append("\n<i>If a week goes by with no message like this, "
+                     "assume the watcher is down.</i>")
+        try:
+            notify.send("\n".join(lines), chat_id=chat_id, silent=True)
+            sent += 1
+        except Exception as exc:
+            log("heartbeat to {} failed: {}".format(chat_id, exc))
+    return sent
+
+
+def cmd_heartbeat(args):
+    store = Store(config.DB_PATH)
+    identity.ensure_owner(store)
+    n = heartbeat(store, days=args.days)
+    log("heartbeat sent to", n, "user(s)")
     return 0
 
 
@@ -449,6 +501,9 @@ def main(argv=None):
     sub.add_parser("telegram").set_defaults(fn=cmd_telegram)
     sub.add_parser("botsetup", help="push bot name, description and commands"
                    ).set_defaults(fn=cmd_botsetup)
+    h = sub.add_parser("heartbeat", help="tell users the watcher is alive")
+    h.add_argument("--days", type=int, default=7)
+    h.set_defaults(fn=cmd_heartbeat)
     c = sub.add_parser("catchup", help="mark existing mail as seen, no alerts")
     c.add_argument("--days", type=int, default=30)
     c.set_defaults(fn=cmd_catchup)
