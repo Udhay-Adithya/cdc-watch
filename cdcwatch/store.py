@@ -177,7 +177,16 @@ class Store:
                 "SELECT * FROM users ORDER BY created_at").fetchall()]
 
     def remove_user(self, chat_id):
+        """Unregister and erase everything held for that chat.
+
+        /stop has to be a real deletion, not just a flag, so the privacy
+        policy can say so without qualification.
+        """
+        chat_id = str(chat_id)
         with self._conn() as c:
             cur = c.execute(
-                "DELETE FROM users WHERE chat_id=? AND is_owner=0", (str(chat_id),))
+                "DELETE FROM users WHERE chat_id=? AND is_owner=0", (chat_id,))
+            if cur.rowcount:
+                c.execute("DELETE FROM events WHERE chat_id=?", (chat_id,))
+                c.execute("DELETE FROM delivered WHERE chat_id=?", (chat_id,))
             return cur.rowcount

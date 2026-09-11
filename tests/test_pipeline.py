@@ -346,5 +346,21 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue(self.store.seen("msg1"))
 
 
+    def test_stop_erases_everything_for_that_user(self):
+        friend = "555000333"
+        self.store.add_user(friend)
+        identity.set_field(self.store, friend, "neo_id", "K1V9R8U3")
+        svc = FakeGmail("Zoho selection list",
+                        "", [("l.xlsx", sheet([rand_id() for _ in range(40)]))])
+        main.process(svc, self.store, "msg1")
+        self.assertTrue(self.store.timeline(chat_id=friend))
+
+        self.store.remove_user(friend)
+        self.assertIsNone(self.store.get_user(friend))
+        self.assertEqual(self.store.timeline(chat_id=friend), [])
+        self.assertFalse(self.store.was_delivered("msg1", friend))
+        self.assertTrue(self.store.timeline(chat_id=CHAT))   # owner untouched
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
