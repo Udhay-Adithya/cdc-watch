@@ -39,6 +39,7 @@ COMMANDS = [
     ("setname", "set your full name"),
     ("addid", "add a drive specific id (tcs, superset)"),
     ("delid", "remove a drive specific id"),
+    ("search", "check past cdc mail, e.g. /search foodhub"),
     ("status", "recent drives seen for you"),
     ("check", "sweep for new cdc mail now"),
     ("stop", "unregister and stop alerts"),
