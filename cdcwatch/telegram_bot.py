@@ -7,21 +7,47 @@ who found the bot could register and use someone else's Pi and mailbox.
 import threading
 import time
 
-import requests
-
 from . import botmeta, config, identity, notify
 
 OFFSET_KEY = "tg_offset"
+PENDING_PREFIX = "pending."
+# A half-finished prompt should not swallow an unrelated message sent an hour
+# later, so pending state expires.
+PENDING_TTL = 600
+
+# command -> (pending key, prompt, placeholder)
+PROMPTS = {
+    "setneo": ("neo_id", "Send me your <b>Neo ID</b>.", "B5R7O9J8"),
+    "setreg": ("reg_no", "Send me your <b>registration number</b>.", "23BCE7625"),
+    "setname": ("name", "Send me your <b>full name</b>.", "Udhay Adithya J"),
+    "addid": ("addid", "Send the <b>reference id</b> to add.\n"
+                       "<i>TCS reference or Cognizant Superset id.</i>",
+              "CT20264998331"),
+    "delid": ("delid", "Send the <b>reference id</b> to remove.", "CT20264998331"),
+    "search": ("search", "What should I look for?", "foodhub"),
+    "kick": ("kick", "Send the <b>chat id</b> to remove.", "123456789"),
+    "start": ("invite", "Send me the <b>invite code</b>.", "invite code"),
+}
+
+
+class Reply:
+    """A bot response, optionally asking for one value back."""
+
+    def __init__(self, text, ask=None):
+        self.text = text
+        self.ask = ask
 
 HELP = """<b>CDC watcher</b>
 
 /whoami — show what is being matched for you
-/setneo &lt;id&gt; — set your Neo ID (e.g. B5R7O9J8)
-/setreg &lt;no&gt; — set your registration number (e.g. 23BCE7625)
-/setname &lt;name&gt; — set your full name
-/addid &lt;ref&gt; — add a drive-specific id (TCS CT…, Superset 8254250)
-/delid &lt;ref&gt; — remove one
-/search &lt;company&gt; — check past CDC mail, e.g. /search foodhub
+/setneo — set your Neo ID
+/setreg — set your registration number
+/setname — set your full name
+/addid — add a drive-specific id (TCS, Superset)
+/delid — remove one
+/search — check past CDC mail, e.g. foodhub
+
+<i>Send a command on its own and I will ask for the value — no need to type it on the same line.</i>
 /status — the last few drives seen for you
 /check — sweep for new CDC mail now
 /stop — unregister and stop receiving alerts"""
@@ -30,6 +56,13 @@ OWNER_HELP = """
 <b>Owner</b>
 /users — who is registered
 /kick &lt;chat id&gt; — remove someone"""
+
+
+def _cmd_for(field):
+    for cmd, (key, _, _) in PROMPTS.items():
+        if key == field:
+            return cmd
+    return "setneo"
 
 
 class Bot:
@@ -57,13 +90,48 @@ class Bot:
         if arg.strip() != config.INVITE_CODE:
             return "❌ Wrong invite code."
         self.store.add_user(chat_id)
-        return ("✅ Registered.\n\nNow set your Neo ID:\n"
-                "<code>/setneo B5R7O9J8</code>\n\n"
-                "You will only get alerts once it is set." + botmeta.STAR)
+        # Ask for the Neo ID straight away: an account with no id set receives
+        # nothing, so leaving it as a follow-up step is how people end up
+        # registered and silently unwatched.
+        self._set_pending(chat_id, "neo_id")
+        return Reply(
+            "✅ Registered." + botmeta.STAR + "\n\nNow send me your <b>Neo ID</b>.",
+            ask=PROMPTS["setneo"][2],
+        )
+
+    # --- pending prompts --------------------------------------------------
+    def _set_pending(self, chat_id, key):
+        self.store.set(PENDING_PREFIX + str(chat_id),
+                       "{}|{}".format(key, int(time.time())))
+
+    def _take_pending(self, chat_id):
+        """Read and clear the pending prompt, if it has not expired."""
+        raw = self.store.get(PENDING_PREFIX + str(chat_id), "")
+        self.store.set(PENDING_PREFIX + str(chat_id), "")
+        if not raw or "|" not in raw:
+            return None
+        key, _, ts = raw.partition("|")
+        if time.time() - int(ts) > PENDING_TTL:
+            return None
+        return key
+
+    def _prompt(self, cmd):
+        key, text, placeholder = PROMPTS[cmd]
+        return key, Reply(text + "\n\n<i>Or /cancel.</i>", ask=placeholder)
 
     # --- commands ---------------------------------------------------------
     def handle(self, text, chat_id):
-        parts = text.strip().split(maxsplit=1)
+        text = text.strip()
+        is_command = text.startswith("/")
+
+        # Read and clear in both cases: a plain message answers the prompt,
+        # and any command abandons it rather than leaving it to swallow a
+        # later unrelated message.
+        pending = self._take_pending(chat_id)
+        if pending and not is_command:
+            return self._answer(chat_id, pending, text)
+
+        parts = text.split(maxsplit=1)
         cmd = parts[0].lower().lstrip("/").split("@")[0]
         arg = parts[1].strip() if len(parts) > 1 else ""
 
@@ -72,8 +140,21 @@ class Bot:
             if cmd == "start" and arg:
                 return self._register(chat_id, arg)
             if cmd in ("start", "help"):
-                return botmeta.WELCOME
-            return "Send <code>/start &lt;invite code&gt;</code> to register."
+                key, reply = self._prompt("start")
+                self._set_pending(chat_id, key)
+                return Reply(botmeta.WELCOME + "\n\n" + reply.text, ask=reply.ask)
+            return "Send /start to register."
+
+        if cmd == "cancel":
+            return "Nothing pending." if not pending else "Cancelled."
+
+        # Commands that need a value ask for it instead of failing on usage.
+        if cmd in PROMPTS and not arg and cmd != "start":
+            if cmd == "kick" and not user.get("is_owner"):
+                return "Unknown command. Try /help"
+            key, reply = self._prompt(cmd)
+            self._set_pending(chat_id, key)
+            return reply
 
         is_owner = bool(user.get("is_owner"))
 
@@ -127,6 +208,42 @@ class Bot:
         if cmd == "kick" and is_owner:
             removed = self.store.remove_user(arg.strip())
             return "✅ Removed." if removed else "No such user (or that is you)."
+        return "Unknown command. Try /help"
+
+    def _answer(self, chat_id, key, value):
+        """Apply a value the user sent in reply to a prompt."""
+        if key == "invite":
+            return self._register(chat_id, value)
+        if self.store.get_user(chat_id) is None:
+            return "Send /start to register."
+        if key in identity.FIELDS:
+            try:
+                applied = identity.set_field(self.store, chat_id, key, value)
+            except identity.InvalidValue as exc:
+                self._set_pending(chat_id, key)
+                return Reply("❌ {}\n\nTry again, or /cancel.".format(exc),
+                             ask=PROMPTS[_cmd_for(key)][2])
+            return "✅ {} set to <code>{}</code>".format(
+                identity.LABELS[key], applied)
+        if key in ("addid", "delid"):
+            try:
+                if key == "addid":
+                    applied = identity.add_extra_id(self.store, chat_id, value)
+                    return "✅ Now also matching <code>{}</code>".format(applied)
+                applied = identity.remove_extra_id(self.store, chat_id, value)
+                return "✅ No longer matching <code>{}</code>".format(applied)
+            except identity.InvalidValue as exc:
+                self._set_pending(chat_id, key)
+                return Reply("❌ {}\n\nTry again, or /cancel.".format(exc),
+                             ask=PROMPTS[key][2])
+        if key == "search":
+            return self.handle("/search " + value, chat_id)
+        if key == "kick":
+            user = self.store.get_user(chat_id) or {}
+            if not user.get("is_owner"):
+                return "Unknown command. Try /help"
+            return "✅ Removed." if self.store.remove_user(value.strip()) \
+                else "No such user (or that is you)."
         return "Unknown command. Try /help"
 
     def _run_check(self, chat_id):
@@ -191,8 +308,11 @@ class Bot:
                         continue
                     chat_id = str(message["chat"]["id"])
                     try:
-                        notify.send(self.handle(message["text"], chat_id),
-                                    chat_id=chat_id)
+                        reply = self.handle(message["text"], chat_id)
+                        if not isinstance(reply, Reply):
+                            reply = Reply(reply)
+                        notify.send(reply.text, chat_id=chat_id,
+                                    force_reply=reply.ask)
                     except Exception:
                         pass  # one bad chat must not stop the loop
             except Exception:
