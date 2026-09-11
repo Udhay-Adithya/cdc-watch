@@ -1,12 +1,13 @@
 """Entry point: doctor / login / backfill / run / timeline."""
 import argparse
 import json
+import re
 import sys
 import time
 
 from . import botmeta, classify, config, gmail, identity, notify, telegram_bot
 from .extract import extract
-from .matcher import FOUND, NO_LIST, claims_list, evaluate, strip_quotes
+from .matcher import ABSENT, FOUND, NO_LIST, claims_list, evaluate, strip_quotes
 from .store import Store
 
 HISTORY_KEY = "history_id"
@@ -114,6 +115,63 @@ def process(svc, store, msg_id, dry_run=False, verbose=False):
 def _any_ids(text):
     from .ids import find_neo_ids, find_ref_ids, find_reg_nos
     return bool(find_neo_ids(text) or find_reg_nos(text) or find_ref_ids(text))
+
+
+# Anything that could steer the Gmail query somewhere other than CDC mail.
+# A registered friend must not be able to send "from:bank" and read the
+# owner's inbox, so the query is built from a scrubbed phrase, never from
+# raw user text.
+_QUERY_SAFE = re.compile(r"[^A-Za-z0-9 .&'-]+")
+
+SEARCH_ICON = {"FOUND": "\U0001f389", "ABSENT": "\u26aa\ufe0f",
+               "UNPARSED": "\u26a0\ufe0f", "NO_LIST": "\u00b7"}
+
+
+def sanitize_query(text):
+    """Reduce user input to a plain phrase safe to quote into a search."""
+    return _QUERY_SAFE.sub(" ", text or "").strip()[:60]
+
+
+def search_for(svc, store, query, chat_id, limit=8):
+    """Evaluate past CDC mail matching `query` against one user's identity.
+
+    Read-only: it never marks mail seen or records events, so running it
+    cannot affect what the watcher will notify about later.
+    """
+    me = identity.current(store, chat_id)
+    if not identity.is_usable(me):
+        return "Set your Neo ID first with /setneo."
+
+    phrase = sanitize_query(query)
+    if len(phrase) < 3:
+        return "Give me something to search for, e.g. <code>/search foodhub</code>"
+
+    # Scoped to the CDC sender and to subject lines, with the phrase quoted so
+    # nothing in it can be read as a search operator.
+    gmail_query = 'from:{} subject:"{}"'.format(config.WATCH_SENDER, phrase)
+    msg_ids = gmail.search(svc, gmail_query, max_results=limit)
+    if not msg_ids:
+        return "No CDC mail with <b>{}</b> in the subject.".format(
+            notify._esc(phrase))
+
+    lines = ["<b>{}</b>".format(notify._esc(phrase))]
+    for msg_id in msg_ids:
+        try:
+            mail, parsed, claim_text = load_mail(svc, msg_id)
+        except Exception as exc:
+            log("search load failed:", exc)
+            continue
+        verdict = evaluate(parsed.text, me, parsed.warnings, mail.subject,
+                           claim_text)
+        detail = ""
+        if verdict.status == FOUND:
+            detail = " — you are on it"
+        elif verdict.status == ABSENT:
+            detail = " — {} ids, not you".format(verdict.total_ids)
+        lines.append("{} {}{}".format(
+            SEARCH_ICON.get(verdict.status, "\u00b7"),
+            notify._esc(mail.subject[:70]), detail))
+    return "\n".join(lines)
 
 
 def reconcile(svc, store, window="newer_than:3d", dry_run=False, verbose=False):
@@ -307,7 +365,9 @@ def cmd_run(args):
     # discover your chat id.
     if notify.is_configured():
         telegram_bot.Bot(
-            store, on_check=lambda: reconcile(svc, store, "newer_than:7d")
+            store,
+            on_check=lambda: reconcile(svc, store, "newer_than:7d"),
+            on_search=lambda q, cid: search_for(svc, store, q, cid),
         ).start()
         log("telegram command bot listening")
     elif config.TELEGRAM_BOT_TOKEN:

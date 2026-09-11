@@ -21,6 +21,7 @@ HELP = """<b>CDC watcher</b>
 /setname &lt;name&gt; — set your full name
 /addid &lt;ref&gt; — add a drive-specific id (TCS CT…, Superset 8254250)
 /delid &lt;ref&gt; — remove one
+/search &lt;company&gt; — check past CDC mail, e.g. /search foodhub
 /status — the last few drives seen for you
 /check — sweep for new CDC mail now
 /stop — unregister and stop receiving alerts"""
@@ -32,9 +33,10 @@ OWNER_HELP = """
 
 
 class Bot:
-    def __init__(self, store, on_check=None):
+    def __init__(self, store, on_check=None, on_search=None):
         self.store = store
         self.on_check = on_check
+        self.on_search = on_search
         self._stop = threading.Event()
 
     # --- transport --------------------------------------------------------
@@ -99,6 +101,14 @@ class Bot:
                 return "✅ No longer matching <code>{}</code>".format(value)
             except identity.InvalidValue as exc:
                 return "❌ {}".format(exc)
+        if cmd == "search":
+            if not self.on_search:
+                return "Search is not available in this mode."
+            if not arg:
+                return "Usage: <code>/search foodhub</code>"
+            threading.Thread(target=self._run_search, args=(arg, chat_id),
+                             daemon=True).start()
+            return "🔎 Searching…"
         if cmd == "status":
             return self._status(chat_id)
         if cmd == "stop":
@@ -126,6 +136,13 @@ class Bot:
                         chat_id=chat_id)
         except Exception as exc:
             notify.send("⚠️ Sweep failed: {}".format(notify._esc(exc)),
+                        chat_id=chat_id)
+
+    def _run_search(self, query, chat_id):
+        try:
+            notify.send(self.on_search(query, chat_id), chat_id=chat_id)
+        except Exception as exc:
+            notify.send("⚠️ Search failed: {}".format(notify._esc(exc)),
                         chat_id=chat_id)
 
     def _whoami(self, chat_id):
