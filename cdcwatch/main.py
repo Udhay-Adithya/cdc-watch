@@ -17,11 +17,12 @@ def log(*parts):
     print(time.strftime("[%H:%M:%S]"), *parts, flush=True)
 
 
-def process(svc, store, msg_id, dry_run=False, verbose=False):
-    """Fetch and flatten once, then evaluate and notify per registered user."""
-    if store.seen(msg_id) and not dry_run:
-        return None
+def load_mail(svc, msg_id):
+    """Fetch a mail and flatten it to text, resolving the thread fallback.
 
+    Shared by the watcher and by /search so both see a mail identically.
+    Returns (mail, parsed, claim_text).
+    """
     mail = gmail.fetch(svc, msg_id)
     parsed = extract(mail.body_text, mail.body_html, mail.attachments)
     # Claims are judged on the plain body only: the HTML alternative renders
@@ -44,7 +45,15 @@ def process(svc, store, msg_id, dry_run=False, verbose=False):
             if _any_ids(retry.text):
                 retry.sources.append("thread attachment")
                 parsed = retry
+    return mail, parsed, claim_text
 
+
+def process(svc, store, msg_id, dry_run=False, verbose=False):
+    """Fetch and flatten once, then evaluate and notify per registered user."""
+    if store.seen(msg_id) and not dry_run:
+        return None
+
+    mail, parsed, claim_text = load_mail(svc, msg_id)
     meta = classify.classify(mail.subject)
 
     recipients = [u for u in store.list_users()
