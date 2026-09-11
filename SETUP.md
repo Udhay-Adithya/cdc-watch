@@ -45,6 +45,14 @@ Then authorise and check:
 > code change helps. Set a Gmail filter that auto-forwards CDC mail to a
 > personal Gmail, and point `WATCH_SENDER` at the forwarding address instead.
 
+`WATCH_SENDER` takes a comma-separated list. The CDC sends from more than one
+address, and a shortlist arriving from an address you are not watching is a
+shortlist missed — `doctor` reports each one separately so a typo shows up as
+zero messages rather than silence.
+
+**After adding a sender, run `catchup` before `run`**, or the new address's
+whole backlog is treated as new mail and notified.
+
 ## 3. Telegram
 
 1. Message [@BotFather](https://t.me/botfather) → `/newbot`. Copy the token
@@ -82,7 +90,7 @@ In `.env`:
 NEO_ID=B5R7O9J8
 REG_NO=23BCE7625
 FULL_NAME=Your Name
-WATCH_SENDER=students.cdc2027@vitap.ac.in
+WATCH_SENDER=students.cdc2027@vitap.ac.in,placement@vitap.ac.in
 INVITE_CODE=              # blank keeps the bot private to you
 ```
 
@@ -139,8 +147,9 @@ gcloud pubsub topics add-iam-policy-binding cdc-watch \
 gcloud pubsub subscriptions create cdc-watch-sub --topic=cdc-watch
 ```
 
-Add a Gmail filter (`from:<cdc address>` → label `CDC`) so push only fires for
-CDC mail, then set `GCP_PROJECT` and `MODE=push`.
+Add a Gmail filter so push only fires for CDC mail, then set `GCP_PROJECT`
+and `MODE=push`. The filter must cover every address in `WATCH_SENDER` — in
+Gmail's filter box use `from:(a@x OR b@x)` and apply the label `CDC`.
 
 ## On a Raspberry Pi
 

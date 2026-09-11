@@ -19,7 +19,13 @@ FULL_NAME = _get("FULL_NAME")
 ME = {"neo_id": NEO_ID, "reg_no": REG_NO, "name": FULL_NAME}
 
 # --- what to watch --------------------------------------------------------
-WATCH_SENDER = _get("WATCH_SENDER", "students.cdc2027@vitap.ac.in")
+# Comma separated: the CDC sends from more than one address, and a shortlist
+# that arrives from the wrong one is a shortlist missed.
+WATCH_SENDERS = [
+    a.strip() for a in
+    _get("WATCH_SENDER", "students.cdc2027@vitap.ac.in").split(",")
+    if a.strip()
+]
 GMAIL_LABEL = _get("GMAIL_LABEL", "CDC")
 
 # --- delivery -------------------------------------------------------------

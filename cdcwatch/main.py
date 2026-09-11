@@ -157,7 +157,7 @@ def search_for(svc, store, query, chat_id, limit=8):
 
     # Scoped to the CDC sender and to subject lines, with the phrase quoted so
     # nothing in it can be read as a search operator.
-    gmail_query = 'from:{} subject:"{}"'.format(config.WATCH_SENDER, phrase)
+    gmail_query = '{} subject:"{}"'.format(gmail.sender_query(), phrase)
     msg_ids = gmail.search(svc, gmail_query, max_results=limit)
     if not msg_ids:
         return "No CDC mail with <b>{}</b> in the subject.".format(
@@ -185,7 +185,7 @@ def search_for(svc, store, query, chat_id, limit=8):
 
 def reconcile(svc, store, window="newer_than:3d", dry_run=False, verbose=False):
     """Safety net: catch anything a missed notification or an offline Pi lost."""
-    query = "from:{} {}".format(config.WATCH_SENDER, window)
+    query = "{} {}".format(gmail.sender_query(), window)
     count = 0
     for msg_id in gmail.search(svc, query):
         if process(svc, store, msg_id, dry_run=dry_run, verbose=verbose) is not None:
@@ -197,10 +197,12 @@ def cmd_doctor(args):
     """The 10-minute check that validates the whole auth design."""
     ok = True
     print("config")
-    for key in ("NEO_ID", "REG_NO", "FULL_NAME", "WATCH_SENDER"):
+    for key in ("NEO_ID", "REG_NO", "FULL_NAME"):
         value = getattr(config, key)
         print("  {:<14} {}".format(key, value or "MISSING"))
         ok &= bool(value)
+    print("  {:<14} {}".format("watching", ", ".join(config.WATCH_SENDERS) or "MISSING"))
+    ok &= bool(config.WATCH_SENDERS)
     print("  {:<14} {}".format("credentials", "found" if config.CREDENTIALS_PATH.exists() else "MISSING"))
     print("  {:<14} {}".format("telegram", "set" if config.TELEGRAM_BOT_TOKEN else "not set"))
     print("  {:<14} {}".format("NIM key", "set" if config.NIM_API_KEY else "not set (regex only)"))
@@ -210,10 +212,11 @@ def cmd_doctor(args):
         svc = gmail.service()
         profile = svc.users().getProfile(userId="me").execute()
         print("  authorised as", profile["emailAddress"])
-        hits = gmail.search(svc, "from:{}".format(config.WATCH_SENDER), max_results=5)
-        print("  CDC mail reachable:", len(hits), "recent message(s)")
-        if not hits:
-            print("  (no mail from that sender yet -- check WATCH_SENDER)")
+        for address in config.WATCH_SENDERS:
+            hits = gmail.search(svc, "from:{}".format(address), max_results=5)
+            print("  {:<32} {} recent message(s){}".format(
+                address, len(hits), "" if hits else "  <- nothing, check this"))
+            ok &= bool(hits)
     except gmail.NeedsReauth as exc:
         ok = False
         print("  NOT AUTHORISED. Run: python -m cdcwatch.main login")
@@ -257,7 +260,7 @@ def baseline(svc, store, window="newer_than:30d"):
     A first start should not replay a month of shortlists onto your phone.
     """
     marked = 0
-    for msg_id in gmail.search(svc, "from:{} {}".format(config.WATCH_SENDER, window)):
+    for msg_id in gmail.search(svc, "{} {}".format(gmail.sender_query(), window)):
         if not store.seen(msg_id):
             store.mark_seen(msg_id)
             marked += 1
@@ -433,7 +436,8 @@ def cmd_run(args):
 
 
 def _run_poll(svc, store):
-    log("poll mode, every", config.POLL_INTERVAL, "s, sender:", config.WATCH_SENDER)
+    log("poll mode, every", config.POLL_INTERVAL, "s, senders:",
+        ", ".join(config.WATCH_SENDERS))
     if not store.get("baselined"):
         # Fresh database: establish "everything before now is old news" so the
         # first start is quiet and only genuinely new mail alerts.

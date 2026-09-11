@@ -140,6 +140,14 @@ def history_since(svc, history_id, label_id):
             return ids, resp.get("historyId", history_id)
 
 
+def sender_query(senders=None):
+    """Gmail `from:` clause covering every watched address."""
+    senders = senders or config.WATCH_SENDERS
+    if len(senders) == 1:
+        return "from:{}".format(senders[0])
+    return "(" + " OR ".join("from:{}".format(a) for a in senders) + ")"
+
+
 def search(svc, query, max_results=1000):
     """All message ids matching `query`, following pagination.
 
