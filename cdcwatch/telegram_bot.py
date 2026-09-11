@@ -9,7 +9,7 @@ import time
 
 import requests
 
-from . import config, identity, notify
+from . import botmeta, config, identity, notify
 
 OFFSET_KEY = "tg_offset"
 
@@ -57,7 +57,7 @@ class Bot:
         self.store.add_user(chat_id)
         return ("✅ Registered.\n\nNow set your Neo ID:\n"
                 "<code>/setneo B5R7O9J8</code>\n\n"
-                "You will only get alerts once it is set.")
+                "You will only get alerts once it is set." + botmeta.STAR)
 
     # --- commands ---------------------------------------------------------
     def handle(self, text, chat_id):
@@ -67,8 +67,10 @@ class Bot:
 
         user = self.store.get_user(chat_id)
         if user is None:
-            if cmd == "start":
+            if cmd == "start" and arg:
                 return self._register(chat_id, arg)
+            if cmd in ("start", "help"):
+                return botmeta.WELCOME
             return "Send <code>/start &lt;invite code&gt;</code> to register."
 
         is_owner = bool(user.get("is_owner"))

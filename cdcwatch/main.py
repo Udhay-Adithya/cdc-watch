@@ -4,7 +4,7 @@ import json
 import sys
 import time
 
-from . import classify, config, gmail, identity, notify, telegram_bot
+from . import botmeta, classify, config, gmail, identity, notify, telegram_bot
 from .extract import extract
 from .matcher import FOUND, NO_LIST, claims_list, evaluate, strip_quotes
 from .store import Store
@@ -196,6 +196,23 @@ def cmd_catchup(args):
     return 0
 
 
+def cmd_botsetup(args):
+    """Push the bot's name, descriptions and command menus to telegram."""
+    if not config.TELEGRAM_BOT_TOKEN:
+        print("TELEGRAM_BOT_TOKEN is not set in .env")
+        return 2
+    try:
+        for item in botmeta.apply_all():
+            print("set", item)
+    except notify.TelegramError as exc:
+        print("failed:", exc)
+        return 1
+    print("\nthe profile photo and the picture above the description have no")
+    print("bot api method -- set those in @BotFather with /setuserpic and")
+    print("/setdescription -> edit description picture.")
+    return 0
+
+
 def cmd_telegram(args):
     """Verify the bot token and find your chat id."""
     import requests
@@ -361,6 +378,8 @@ def main(argv=None):
     sub.add_parser("run").set_defaults(fn=cmd_run)
     sub.add_parser("renew").set_defaults(fn=cmd_renew)
     sub.add_parser("telegram").set_defaults(fn=cmd_telegram)
+    sub.add_parser("botsetup", help="push bot name, description and commands"
+                   ).set_defaults(fn=cmd_botsetup)
     c = sub.add_parser("catchup", help="mark existing mail as seen, no alerts")
     c.add_argument("--days", type=int, default=30)
     c.set_defaults(fn=cmd_catchup)
