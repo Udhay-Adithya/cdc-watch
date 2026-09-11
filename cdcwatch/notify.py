@@ -70,12 +70,19 @@ def _call(method, **kwargs):
     return data
 
 
-def send(text, buttons=None, silent=False, chat_id=None):
+def send(text, buttons=None, silent=False, chat_id=None, force_reply=None):
     payload = dict(text=text, parse_mode="HTML", disable_notification=silent,
                    chat_id=chat_id)
     payload["link_preview_options"] = {"is_disabled": True}
     if buttons:
         payload["reply_markup"] = {"inline_keyboard": buttons}
+    elif force_reply:
+        # Opens the keyboard with a focused input box, so the user types just
+        # the value instead of retyping the command with an argument.
+        payload["reply_markup"] = {
+            "force_reply": True,
+            "input_field_placeholder": str(force_reply)[:64],
+        }
     return _call("sendMessage", **payload)
 
 
