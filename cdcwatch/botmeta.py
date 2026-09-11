@@ -43,6 +43,7 @@ COMMANDS = [
     ("status", "recent drives seen for you"),
     ("check", "sweep for new cdc mail now"),
     ("stop", "unregister and stop alerts"),
+    ("cancel", "abandon whatever i just asked for"),
     ("help", "show every command"),
 ]
 
@@ -55,9 +56,8 @@ WELCOME = (
     "👋 <b>VITAP CDC Watch</b>\n\n"
     "I watch CDC placement mail and check every shortlist for your Neo ID, so "
     "you hear about it the moment it lands.\n\n"
-    "To register, send:\n"
-    "<code>/start &lt;invite code&gt;</code>\n\n"
-    "Ask whoever runs this watcher for the code."
+    "To register, send me the invite code.\n"
+    "Ask whoever runs this watcher for it."
 )
 
 STAR = (
