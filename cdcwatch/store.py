@@ -146,6 +146,15 @@ class Store:
                 "INSERT OR IGNORE INTO delivered(msg_id,chat_id,sent_at) "
                 "VALUES(?,?,?)", (msg_id, str(chat_id), _now()))
 
+    def status_counts_since(self, chat_id, since_iso):
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT status, COUNT(*) AS n FROM events "
+                "WHERE chat_id=? AND created_at>=? GROUP BY status",
+                (str(chat_id), since_iso),
+            ).fetchall()
+        return {r["status"]: r["n"] for r in rows}
+
     # --- users ------------------------------------------------------------
     def add_user(self, chat_id, is_owner=False):
         with self._conn() as c:

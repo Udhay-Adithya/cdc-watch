@@ -362,5 +362,28 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue(self.store.timeline(chat_id=CHAT))   # owner untouched
 
 
+    def test_heartbeat_reaches_only_configured_users(self):
+        ready = "555000444"
+        self.store.add_user(ready)
+        identity.set_field(self.store, ready, "neo_id", "K1V9R8U3")
+        self.store.add_user("555000555")          # registered, no id set
+
+        sent = []
+        notify.send = lambda text, **kw: sent.append(kw.get("chat_id"))
+        self.assertEqual(main.heartbeat(self.store), 2)
+        self.assertEqual(sorted(sent), sorted([CHAT, ready]))
+
+    def test_heartbeat_counts_this_users_events(self):
+        for status, n in (("ABSENT", 5), ("FOUND", 2), ("NO_LIST", 9)):
+            for i in range(n):
+                self.store.add_event(msg_id="m{}{}".format(status, i),
+                                     chat_id=CHAT, status=status, subject="x")
+        sent = []
+        notify.send = lambda text, **kw: sent.append(text)
+        main.heartbeat(self.store)
+        self.assertIn("16 CDC mail checked", sent[0])
+        self.assertIn("2 you were on", sent[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
