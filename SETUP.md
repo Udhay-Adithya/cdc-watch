@@ -188,7 +188,7 @@ anyone who found the bot could register and use your Pi and your mailbox.
 ## Tests
 
 ```bash
-.venv/bin/python tests/test_pipeline.py
+.venv/bin/python -m unittest discover -s tests
 ```
 
 Runs the full fetch → extract → match → notify path against a fake Gmail
