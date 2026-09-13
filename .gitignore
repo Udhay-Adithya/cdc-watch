@@ -5,3 +5,4 @@ __pycache__/
 credentials.json
 token.json
 state.db
+.DS_Store
